@@ -1,63 +1,39 @@
 import os
-import logging
-from dotenv import load_dotenv
+import time
 from prometheus_client import start_http_server, Gauge
 import psutil
+from dotenv import load_dotenv
 
-# Настройка логгирования
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger()
-
-# Загружаем переменные окружения из файла .env
 load_dotenv()
 
-# Получаем значения переменных окружения
-exporter_host = os.getenv("EXPORTER_HOST", "0.0.0.0")
-exporter_port = int(os.getenv("EXPORTER_PORT", 8000))
+HOST = os.getenv('EXPORTER_HOST', '0.0.0.0')
+PORT = int(os.getenv('EXPORTER_PORT', 8080))
 
-# Логируем загрузку переменных окружения
-logger.info(f"Экспортер запускается на {exporter_host}:{exporter_port}")
+print(f"Экспортер запускается на http://{HOST}:{PORT}/metrics")
 
-# Создаем метрики для Prometheus
-cpu_usage = Gauge('cpu_usage_percent', 'Процент использования процессора')
-memory_total = Gauge('memory_total_bytes', 'Общий объем оперативной памяти')
+cpu_usage = Gauge('cpu_usage_percent', 'Процент использования CPU', ['core'])
+memory_total = Gauge('memory_total_bytes', 'Общий объём оперативной памяти')
 memory_used = Gauge('memory_used_bytes', 'Используемая оперативная память')
-disk_total = Gauge('disk_total_bytes', 'Общий объем дисков')
-disk_used = Gauge('disk_used_bytes', 'Используемый объем дисков')
 
-# Функция для сбора метрик
+disk_total = Gauge('disk_total_bytes', 'Общий объём дискового пространства')
+disk_used = Gauge('disk_used_bytes', 'Используемое дисковое пространство')
+
+
 def collect_metrics():
-    try:
-        # Процессор
-        cpu_usage.set(psutil.cpu_percent())
-        
-        # Память
-        memory_info = psutil.virtual_memory()
-        memory_total.set(memory_info.total)
-        memory_used.set(memory_info.used)
-        
-        # Диски
-        disk_info = psutil.disk_usage('/')
-        disk_total.set(disk_info.total)
-        disk_used.set(disk_info.used)
+    cpu_percentages = psutil.cpu_percent(interval=1, percpu=True)
+    for i, percentage in enumerate(cpu_percentages):
+        core_label = f'core_{i}'
+        cpu_usage.labels(core=core_label).set(percentage)
 
-        logger.info("Метрики успешно обновлены")
-    except Exception as e:
-        logger.error(f"Ошибка при сборе метрик: {e}")
+    memory = psutil.virtual_memory()
+    memory_total.set(memory.total)
+    memory_used.set(memory.used)
 
-# Главная функция
-def main():
-    try:
-        # Запускаем HTTP-сервер для Prometheus
-        logger.info(f"Запуск сервера на {exporter_host}:{exporter_port}")
-        start_http_server(exporter_port, addr=exporter_host)
-        
-        # Периодическое обновление метрик
-        logger.info("Сбор метрик начат")
-        while True:
-            collect_metrics()
-    except Exception as e:
-        logger.error(f"Ошибка при запуске экспортера: {e}")
+    disk = psutil.disk_usage('/')
+    disk_total.set(disk.total)
+    disk_used.set(disk.used)
 
-if __name__ == "__main__":
-    main()
+
+start_http_server(PORT, addr=HOST)
+while True:
+    collect_metrics()
